@@ -1,22 +1,27 @@
 import datetime
 import torch
-from transformers import AutoProcessor, AutoModelForImageTextToText
+from transformers import AutoProcessor, AutoModelForImageTextToText, BitsAndBytesConfig
 from PIL import Image
 import os
 
 # Initialize model and processor
-# checkpoint = "HuggingFaceTB/SmolVLM2-2.2B-Instruct"
+checkpoint = "HuggingFaceTB/SmolVLM2-2.2B-Instruct"
 # checkpoint = "HuggingFaceTB/SmolVLM2-250M-Video-Instruct"
-checkpoint = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
+# checkpoint = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
 print(f"Loading {checkpoint}...")
+
+# Quantization config
+# quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+quantization_config = BitsAndBytesConfig(load_in_4bit=True)
 
 try:
     processor = AutoProcessor.from_pretrained(checkpoint, trust_remote_code=True)
     model = AutoModelForImageTextToText.from_pretrained(
         checkpoint, 
         trust_remote_code=True,
-        dtype=torch.float32
-    ).to("cuda" if torch.cuda.is_available() else "cpu")
+        quantization_config=quantization_config,
+        device_map="auto"
+    )
 except Exception as e:
     print(f"Error loading model with AutoModelForImageTextToText: {e}")
     print("Trying with AutoModelForVision2Seq...")
@@ -25,8 +30,9 @@ except Exception as e:
         model = AutoModelForVision2Seq.from_pretrained(
             checkpoint, 
             trust_remote_code=True,
-            dtype=torch.float32
-        ).to("cuda" if torch.cuda.is_available() else "cpu")
+            quantization_config=quantization_config,
+            device_map="auto"
+        )
     except Exception as e:
         print(f"Error loading model with AutoModelForVision2Seq: {e}")
         exit(1)
@@ -67,11 +73,6 @@ for image_file in image_files:
                     Your strength really lies with hexadecimal numbers with 8 characters of length.
                     You always respond with only the hexadecimal numbers found in the image and your confidence level.
                     If no hexadecimal numbers are found, respond with 'No hexadecimal numbers found.',0%
-                    Examples:
-                    14413C4D,95%
-                    1441EF12,90%
-                    11111111,5%
-                    No hexadecimal numbers found.,0%
                     """
                 }
             ]
@@ -100,6 +101,28 @@ for image_file in image_files:
         # Decode
         response = processor.decode(outputs[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True)
         print(f"Result for {image_file}: {response.strip()}")
+
+        # # Add thinking step
+        # messages.append({"role": "assistant", "content": [{"type": "text", "text": response}]})
+        # messages.append({
+        #     "role": "user", 
+        #     "content": [{"type": "text", "text": """Are there exactly 8 characters in the hexadecimal number you provided?
+        #                  Respond with SUCCESS if yes, else FAILURE.  Only respond with SUCCESS or FAILURE.
+        #                  """}]
+        # })
+
+        # inputs = processor.apply_chat_template(
+        #     messages,
+        #     add_generation_prompt=True,
+        #     tokenize=True,
+        #     return_dict=True,
+        #     return_tensors="pt",
+        # ).to(model.device)
+
+        # outputs = model.generate(**inputs, max_new_tokens=100)
+        # response_thinking = processor.decode(outputs[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True)
+        # print(f"Thinking for {image_file}: {response_thinking.strip()}")
+
         print(f" Took {(datetime.datetime.now() - start).total_seconds():.2f}")
     except Exception as e:
         print(f"Error during generation for {image_file}: {e}")
